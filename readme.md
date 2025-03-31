@@ -55,3 +55,6 @@ python predict.py
 ```
 Los resultados se mostrarán en consola.
 
+---
+Referencias:
+https://github.com/jingwenshi-dev/Weather-Forecasting-by-GRU-Transformer
