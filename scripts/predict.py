@@ -9,8 +9,11 @@ model = tf.keras.models.load_model("models/gru_model.keras")
 scaler_X = joblib.load("models/scaler_X.pkl")
 scaler_y = joblib.load("models/scaler_y.pkl")
 
-# Parametros de entrada
+# Paarametros
 fecha_str = "2025-04-02"
+
+
+#coders
 hora_inicio = 10
 incidencias_aprox = 5
 clientes_aprox = 500
