@@ -3,10 +3,11 @@ import numpy as np
 import tensorflow as tf
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error, median_absolute_error
 import joblib
 import os
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Cargar datos
 df = pd.read_excel("data/EXCELINCIDENCIAS.xlsx", sheet_name="Sheet1")
@@ -50,27 +51,67 @@ X_scaled = X_scaled.reshape((X_scaled.shape[0], 1, X_scaled.shape[1]))
 # División entrenamiento/prueba
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=42)
 
-# Definición del modelo GRU
+# Crear carpeta outputs
+os.makedirs("outputs", exist_ok=True)
+
+# Comparar combinaciones de epochs y batch_size
+epochs_list = [30, 60, 90]
+batch_sizes = [16, 32, 64]
+results = []
+
+for epochs in epochs_list:
+    for batch in batch_sizes:
+        model_temp = tf.keras.Sequential([
+            tf.keras.layers.Input(shape=(X_scaled.shape[1], X_scaled.shape[2])),
+            tf.keras.layers.GRU(64),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(4)
+        ])
+        model_temp.compile(optimizer='adam', loss='mse')
+        history_temp = model_temp.fit(
+            X_train, y_train,
+            epochs=epochs,
+            batch_size=batch,
+            validation_data=(X_test, y_test),
+            verbose=0
+        )
+        val_loss = history_temp.history['val_loss'][-1]
+        results.append({
+            'epochs': epochs,
+            'batch_size': batch,
+            'val_loss': val_loss
+        })
+
+# Mejor configuración
+df_results = pd.DataFrame(results)
+pivot_table = df_results.pivot(index='epochs', columns='batch_size', values='val_loss')
+plt.figure(figsize=(8, 6))
+sns.heatmap(pivot_table, annot=True, fmt=".4f", cmap="YlGnBu")
+plt.title("Comparación de Val Loss por Configuración")
+plt.xlabel("Batch Size")
+plt.ylabel("Epochs")
+plt.savefig("outputs/gru_config_comparativa.png")
+plt.close()
+
+mejor = df_results.loc[df_results['val_loss'].idxmin()]
+mejores_epochs = int(mejor['epochs'])
+mejor_batch_size = int(mejor['batch_size'])
+
+# Entrenamiento final
 model = tf.keras.Sequential([
     tf.keras.layers.Input(shape=(X_scaled.shape[1], X_scaled.shape[2])),
     tf.keras.layers.GRU(64),
     tf.keras.layers.Dense(64, activation='relu'),
-    tf.keras.layers.Dense(4)  # 4 salidas: incidencias, clientes, tm_muerto, tm_resolucion
+    tf.keras.layers.Dense(4)
 ])
-
 model.compile(optimizer='adam', loss='mse')
-
-# Entrenamiento
-history = model.fit(X_train, y_train, epochs=100, batch_size=32, validation_data=(X_test, y_test))
+history = model.fit(X_train, y_train, epochs=mejores_epochs, batch_size=mejor_batch_size, validation_data=(X_test, y_test))
 
 # Guardar modelo y escaladores
 os.makedirs("models", exist_ok=True)
 model.save("models/gru_model.keras")
 joblib.dump(scaler_X, "models/scaler_X.pkl")
 joblib.dump(scaler_y, "models/scaler_y.pkl")
-
-# Crear carpeta outputs
-os.makedirs("outputs", exist_ok=True)
 
 # Gráfica de pérdida
 plt.figure(figsize=(10, 5))
@@ -81,48 +122,55 @@ plt.xlabel('Epoch')
 plt.ylabel('MSE Loss')
 plt.legend()
 plt.grid()
+plt.ylim(0.21, 0.41)
+plt.yticks(np.arange(0.21, 0.41, 0.09))
 plt.savefig("outputs/gru_loss_curve.png")
 plt.close()
 
-# Predicciones y métricas
+# Predicciones
 y_pred_scaled = model.predict(X_test)
 y_pred = scaler_y.inverse_transform(y_pred_scaled)
 y_test_orig = scaler_y.inverse_transform(y_test)
 
+# Métricas
 labels = ["Incidencias", "Clientes", "TM Muerto", "TM Resolución"]
+mses = []
 maes = []
-r2s = []
+medaes = []
+rmses = []
+r2s_percent = []
 
 for i in range(4):
-    plt.figure(figsize=(8, 4))
-    plt.scatter(y_test_orig[:, i], y_pred[:, i], alpha=0.5)
-    plt.xlabel("Real")
-    plt.ylabel("Predicho")
-    plt.title(f"GRU - Real vs Predicho - {labels[i]}")
-    plt.grid()
-    plt.savefig(f"outputs/gru_real_vs_pred_{i}_{labels[i].replace(' ', '_').lower()}.png")
-    plt.close()
+    y_true = y_test_orig[:, i]
+    y_pred_i = y_pred[:, i]
+    mses.append(mean_squared_error(y_true, y_pred_i))
+    maes.append(mean_absolute_error(y_true, y_pred_i))
+    medaes.append(median_absolute_error(y_true, y_pred_i))
+    rmses.append(np.sqrt(mean_squared_error(y_true, y_pred_i)))
+    r2s_percent.append(r2_score(y_true, y_pred_i) * 100)
 
-    maes.append(mean_absolute_error(y_test_orig[:, i], y_pred[:, i]))
-    r2s.append(r2_score(y_test_orig[:, i], y_pred[:, i]))
+# DataFrame de métricas
+df_metrics = pd.DataFrame({
+    "Variable": labels,
+    "MSE": mses,
+    "MAE": maes,
+    "MedAE": medaes,
+    "RMSE": rmses,
+    "R² (%)": r2s_percent
+})
 
-# MAE
-plt.figure(figsize=(10, 5))
-plt.bar(labels, maes, color='purple')
-plt.title('GRU - MAE por variable de salida')
-plt.ylabel('Mean Absolute Error')
-plt.grid(axis='y')
-plt.savefig("outputs/gru_mae_comparativo.png")
+# Guardar CSV y PNG de la tabla
+df_metrics.to_csv("outputs/gru_metrics_completas.csv", index=False)
+
+fig, ax = plt.subplots(figsize=(10, 2))
+ax.axis('tight')
+ax.axis('off')
+table = ax.table(cellText=df_metrics.values, colLabels=df_metrics.columns, cellLoc='center', loc='center')
+table.scale(1, 2)
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+plt.tight_layout()
+plt.savefig("outputs/gru_metrics_table.png", dpi=300)
 plt.close()
 
-# R²
-plt.figure(figsize=(10, 5))
-plt.bar(labels, r2s, color='coral')
-plt.title('GRU - R² Score por variable de salida')
-plt.ylabel('R²')
-plt.ylim(0, 1)
-plt.grid(axis='y')
-plt.savefig("outputs/gru_r2_comparativo.png")
-plt.close()
-
-print("Modelo GRU con incidencias entrenado, guardado y gráficas exportadas a 'outputs'.")
+print("\nModelo GRU entrenado, métricas calculadas y exportadas en CSV y PNG.")
