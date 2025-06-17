@@ -9,7 +9,7 @@ output_dir = "eda_outputs"
 os.makedirs(output_dir, exist_ok=True)
 
 # Cargar el archivo
-df = pd.read_excel("data/EXCELINCIDENCIASS.xlsx")
+df = pd.read_excel("data/EXCELINCIDENCIAS.xlsx")
 
 # Procesar fechas
 df["INICIO INCIDENCIA"] = pd.to_datetime(df["INICIO INCIDENCIA"])
