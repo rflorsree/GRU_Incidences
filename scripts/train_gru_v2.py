@@ -1,7 +1,4 @@
 
-### comparativa de los modelos y conclusion del mejor modelo, con descripcion de las graficas
-
-### 3 causas
 ### justificacioin de los dataset y si los valores son aptos para los modelos
 
 
